@@ -4,12 +4,19 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <cerrno>
+#include <string>
+#include <vector>
 
 enum class LaunchStatus {
     Success,
     ExecFailed,
     ReadFailed,
     ProtocolError,
+};
+
+struct Job {
+    std::string executable;
+    std::vector<std::string> arguments;
 };
 
 int main() {
@@ -20,6 +27,21 @@ int main() {
 
         std::exit(EXIT_FAILURE);
     }
+
+    Job job {
+        "/bin/echo",
+        {"hello", "world"}
+    };
+
+    std::vector<char*> argv;
+
+    argv.push_back(job.executable.data());
+
+    for (std::string& argument : job.arguments) {
+        argv.push_back(argument.data());
+    }
+
+    argv.push_back(nullptr);
 
     pid_t pid = fork();
 
@@ -35,7 +57,7 @@ int main() {
     else if (pid == 0) {
         close(pipe_fds[0]);
 
-        execl("/bin/echo", "echo", "hello", static_cast<char*>(nullptr));
+        execv(job.executable.data(), argv.data());
 
         int exec_errno = errno;
 
