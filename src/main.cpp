@@ -58,6 +58,74 @@ int main(int argc, char* argv[]) {
         std::exit(EXIT_FAILURE);
     }
 
+    if (!manifest_json.is_object()) {
+        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+        std::cerr << "The top-level must be a JSON object." << std::endl;
+
+        std::exit(EXIT_FAILURE);
+    }
+
+    for (auto field = manifest_json.begin(); field != manifest_json.end(); ++field) {
+        if (!(field.key() == "executable" || field.key() == "arguments")) {
+            std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+            std::cerr << "Unknown field: " << field.key() << std::endl;
+
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    if (!manifest_json.contains("executable")) {
+        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+        std::cerr << "Missing required field: executable" << std::endl;
+
+        std::exit(EXIT_FAILURE);
+    }
+
+    if (!manifest_json["executable"].is_string()) {
+        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+        std::cerr << "Field 'executable' must be a string." << std::endl;
+
+        std::exit(EXIT_FAILURE);
+    }
+
+    std::string executable = manifest_json["executable"].get<std::string>();
+
+    if (executable.empty()) {
+        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+        std::cerr << "Field 'executable' cannot be empty." << std::endl;
+
+        std::exit(EXIT_FAILURE);
+    }
+
+    std::vector<std::string> arguments;
+
+    if (manifest_json.contains("arguments")) {
+        if (!manifest_json["arguments"].is_array()) {
+            std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+            std::cerr << "Field 'arguments' must be an array." << std::endl;
+
+            std::exit(EXIT_FAILURE);
+        }
+
+        for (const auto& element : manifest_json["arguments"]) {
+            if (!element.is_string()) {
+                std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+                std::cerr << "Each element of field 'arguments' must be a string." << std::endl;
+
+                std::exit(EXIT_FAILURE);
+            }
+
+            arguments.push_back(element.get<std::string>());
+        }
+    }
+
     int pipe_fds[2];
 
     if (pipe2(pipe_fds, O_CLOEXEC) == -1) {
@@ -66,10 +134,9 @@ int main(int argc, char* argv[]) {
         std::exit(EXIT_FAILURE);
     }
 
-    Job job {
-        "/bin/echo",
-        {"hello", "world"}
-    };
+    Job job;
+    job.executable = executable;
+    job.arguments = arguments;
 
     std::vector<char*> job_argv;
 

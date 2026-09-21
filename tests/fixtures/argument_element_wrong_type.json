@@ -1,0 +1,4 @@
+{
+    "executable": "/bin/echo",
+    "arguments": [12, "world"]
+}
