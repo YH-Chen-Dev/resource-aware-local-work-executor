@@ -27,6 +27,28 @@ target_link_libraries(
 enable_testing()
 
 add_test(
-    NAME work_executor_test
+    NAME missing_manifest_path
     COMMAND work_executor
+)
+
+set_tests_properties(
+    missing_manifest_path
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+add_test(
+    NAME single_manifest_argument
+    COMMAND work_executor dummy.json
+)
+
+add_test(
+    NAME too_many_arguments
+    COMMAND work_executor a.json b.json
+)
+
+set_tests_properties(
+    too_many_arguments
+    PROPERTIES
+    WILL_FAIL TRUE
 )

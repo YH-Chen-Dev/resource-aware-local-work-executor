@@ -19,7 +19,21 @@ struct Job {
     std::vector<std::string> arguments;
 };
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        if (argc < 2) {
+            std::cerr << "Error: missing manifest file path." << std::endl;
+        }
+
+        else if (argc > 2) {
+            std::cerr << "Error: unexpected command-line arguments." << std::endl;
+        }
+
+        std::cerr << "Usage: work_executor <manifest-path>" << std::endl;
+
+        std::exit(EXIT_FAILURE);
+    }
+
     int pipe_fds[2];
 
     if (pipe2(pipe_fds, O_CLOEXEC) == -1) {
@@ -33,15 +47,15 @@ int main() {
         {"hello", "world"}
     };
 
-    std::vector<char*> argv;
+    std::vector<char*> job_argv;
 
-    argv.push_back(job.executable.data());
+    job_argv.push_back(job.executable.data());
 
     for (std::string& argument : job.arguments) {
-        argv.push_back(argument.data());
+        job_argv.push_back(argument.data());
     }
 
-    argv.push_back(nullptr);
+    job_argv.push_back(nullptr);
 
     pid_t pid = fork();
 
@@ -57,7 +71,7 @@ int main() {
     else if (pid == 0) {
         close(pipe_fds[0]);
 
-        execv(job.executable.data(), argv.data());
+        execv(job.executable.data(), job_argv.data());
 
         int exec_errno = errno;
 
