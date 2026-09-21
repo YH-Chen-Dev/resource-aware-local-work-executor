@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <string>
 #include <vector>
+#include <fstream>
 
 enum class LaunchStatus {
     Success,
@@ -30,6 +31,15 @@ int main(int argc, char* argv[]) {
         }
 
         std::cerr << "Usage: work_executor <manifest-path>" << std::endl;
+
+        std::exit(EXIT_FAILURE);
+    }
+
+    const std::string manifest_path = argv[1];
+    std::ifstream manifest_file(manifest_path);
+
+    if (!manifest_file.is_open()) {
+        std::cerr << "Error: failed to open manifest file: " << manifest_path << std::endl;
 
         std::exit(EXIT_FAILURE);
     }

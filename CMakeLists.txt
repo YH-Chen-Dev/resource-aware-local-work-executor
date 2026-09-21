@@ -39,7 +39,18 @@ set_tests_properties(
 
 add_test(
     NAME single_manifest_argument
-    COMMAND work_executor dummy.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/existing_manifest.json
+)
+
+add_test(
+    NAME nonexistent_manifest_file
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/does_not_exist.json
+)
+
+set_tests_properties(
+    nonexistent_manifest_file
+    PROPERTIES
+    WILL_FAIL TRUE
 )
 
 add_test(
