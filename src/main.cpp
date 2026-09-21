@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <nlohmann/json.hpp>
 
 enum class LaunchStatus {
     Success,
@@ -40,6 +41,19 @@ int main(int argc, char* argv[]) {
 
     if (!manifest_file.is_open()) {
         std::cerr << "Error: failed to open manifest file: " << manifest_path << std::endl;
+
+        std::exit(EXIT_FAILURE);
+    }
+
+    nlohmann::json manifest_json;
+
+    try {
+        manifest_json = nlohmann::json::parse(manifest_file);
+    }
+    catch (const nlohmann::json::parse_error& error) {
+        std::cerr << "Error: failed to parse manifest file: " << manifest_path << std::endl;
+
+        std::cerr << error.what() << std::endl;
 
         std::exit(EXIT_FAILURE);
     }
