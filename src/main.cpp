@@ -8,6 +8,15 @@
 #include <vector>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <optional>
+#include <utility>
+
+enum class ManifestLoadStatus {
+    Success,
+    FileOpenFailed,
+    JsonParseFailed,
+    SchemaInvalid
+};
 
 enum class ExecutorFailureStatus {
     Pipe2Failed,
@@ -33,6 +42,13 @@ enum class ChildLaunchStatus {
 struct Job {
     std::string executable;
     std::vector<std::string> arguments;
+};
+
+struct ManifestLoadResult {
+    ManifestLoadStatus manifest_load_status = ManifestLoadStatus::Success;
+    std::vector<Job> jobs;
+    std::string error_message;
+    std::optional<std::size_t> job_index;
 };
 
 struct JobParseResult {
@@ -294,7 +310,7 @@ JobExecutionResult execute_job(const Job& job) {
     }
 }
 
-void print_job_execution_result(size_t index, const JobExecutionResult& result) {
+void print_job_execution_result(std::size_t index, const JobExecutionResult& result) {
     std::cout << "Job " << index << ":" << std::endl;
 
     switch (result.child_launch_status) {
@@ -356,6 +372,92 @@ void print_job_execution_result(size_t index, const JobExecutionResult& result) 
     }
 }
 
+ManifestLoadResult load_manifest(const std::string& manifest_path) {
+    ManifestLoadResult manifest_load_result;
+
+    std::ifstream manifest_file(manifest_path);
+
+    if (!manifest_file.is_open()) {
+        manifest_load_result.manifest_load_status = ManifestLoadStatus::FileOpenFailed;
+
+        return manifest_load_result;
+    }
+
+    nlohmann::json manifest_json;
+
+    try {
+        manifest_json = nlohmann::json::parse(manifest_file);
+    }
+    catch (const nlohmann::json::parse_error& error) {
+        manifest_load_result.manifest_load_status = ManifestLoadStatus::JsonParseFailed;
+
+        manifest_load_result.error_message = error.what();
+
+        return manifest_load_result;
+    }
+
+    if (!manifest_json.is_array()) {
+        manifest_load_result.manifest_load_status = ManifestLoadStatus::SchemaInvalid;
+
+        manifest_load_result.error_message = "The top-level must be an array.";
+
+        return manifest_load_result;
+    }
+
+    std::vector<Job> jobs;
+
+    std::size_t index = 0;
+    for (const auto& job_json : manifest_json) {
+        JobParseResult job_parse_result = parse_job(job_json);
+
+        if (!job_parse_result.success) {
+            manifest_load_result.manifest_load_status = ManifestLoadStatus::SchemaInvalid;
+
+            manifest_load_result.error_message = job_parse_result.error_message;
+
+            manifest_load_result.job_index = index;
+
+            return manifest_load_result;
+        }
+
+        jobs.push_back(job_parse_result.job);
+
+        index++;
+    }
+
+    manifest_load_result.jobs = std::move(jobs);
+
+    manifest_load_result.manifest_load_status = ManifestLoadStatus::Success;
+
+    return manifest_load_result;
+}
+
+void print_manifest_load_error(const std::string& manifest_path, const ManifestLoadResult& result) {
+    switch (result.manifest_load_status) {
+        case ManifestLoadStatus::FileOpenFailed:
+            std::cerr << "Error: failed to open manifest file: " << manifest_path << std::endl;
+            break;
+
+        case ManifestLoadStatus::JsonParseFailed:
+            std::cerr << "Error: failed to parse manifest file: " << manifest_path << std::endl;
+            std::cerr << result.error_message << std::endl;
+            break;
+
+        case ManifestLoadStatus::SchemaInvalid:
+            std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+            if (result.job_index.has_value()) {
+                std::cerr << "Job " << *result.job_index << ": ";
+            }
+
+            std::cerr << result.error_message << std::endl;
+            break;
+
+        case ManifestLoadStatus::Success:
+            break;
+    }
+}
+
 int main(int argc, char* argv[]) {
     if (argc != 2) {
         if (argc < 2) {
@@ -372,58 +474,20 @@ int main(int argc, char* argv[]) {
     }
 
     const std::string manifest_path = argv[1];
-    std::ifstream manifest_file(manifest_path);
 
-    if (!manifest_file.is_open()) {
-        std::cerr << "Error: failed to open manifest file: " << manifest_path << std::endl;
+    ManifestLoadResult manifest_load_result = load_manifest(manifest_path);
 
-        std::exit(EXIT_FAILURE);
-    }
-
-    nlohmann::json manifest_json;
-
-    try {
-        manifest_json = nlohmann::json::parse(manifest_file);
-    }
-    catch (const nlohmann::json::parse_error& error) {
-        std::cerr << "Error: failed to parse manifest file: " << manifest_path << std::endl;
-
-        std::cerr << error.what() << std::endl;
+    if (manifest_load_result.manifest_load_status != ManifestLoadStatus::Success) {
+        print_manifest_load_error(manifest_path, manifest_load_result);
 
         std::exit(EXIT_FAILURE);
     }
 
-    if (!manifest_json.is_array()) {
-        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+    std::size_t index = 0;
+    for (const Job& job : manifest_load_result.jobs) {
+        JobExecutionResult job_execution_result = execute_job(job);
 
-        std::cerr << "The top-level must be an array." << std::endl;
-
-        std::exit(EXIT_FAILURE);
-    }
-
-    std::vector<Job> jobs;
-
-    size_t index = 0;
-    for (const auto& job_json : manifest_json) {
-        JobParseResult result = parse_job(job_json);
-
-        if (!result.success) {
-            std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
-            std::cerr << "Job " << index << ": " << result.error_message << std::endl;
-
-            std::exit(EXIT_FAILURE);
-        }
-
-        jobs.push_back(result.job);
-
-        index++;
-    }
-
-    index = 0;
-    for (const Job& job : jobs) {
-        JobExecutionResult result = execute_job(job);
-
-        print_job_execution_result(index, result);
+        print_job_execution_result(index, job_execution_result);
 
         index++;
     }
