@@ -1,4 +1,6 @@
-{
-    "executable": "/bin/echo",
-    "arguments": ["hello", "world"]
-}
+[
+    {
+        "executable": "/bin/echo",
+        "arguments": ["hello", "world"]
+    }
+]

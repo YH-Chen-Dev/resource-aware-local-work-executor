@@ -1,0 +1,9 @@
+[
+    {
+        "executable": "/bin/echo",
+        "arguments": ["SHOULD_NOT_RUN"]
+    },
+    {
+        "executable": 123
+    }
+]

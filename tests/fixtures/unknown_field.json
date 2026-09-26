@@ -1,5 +1,7 @@
-{
-    "executable": "/bin/echo",
-    "arguments": ["hello", "world"],
-    "unknown field": 13
-}
+[
+    {
+        "executable": "/bin/echo",
+        "arguments": ["hello", "world"],
+        "unknown field": 13
+    }
+]

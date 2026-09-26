@@ -9,17 +9,352 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-enum class LaunchStatus {
+enum class ExecutorFailureStatus {
+    Pipe2Failed,
+    ForkFailed,
+    WaitpidFailed,
+    None
+};
+
+enum class ChildTerminationStatus {
+    Exited,
+    Signaled,
+    None
+};
+
+enum class ChildLaunchStatus {
     Success,
     ExecFailed,
     ReadFailed,
     ProtocolError,
+    None
 };
 
 struct Job {
     std::string executable;
     std::vector<std::string> arguments;
 };
+
+struct JobParseResult {
+    bool success;
+    Job job;
+    std::string error_message;
+};
+
+struct JobExecutionResult {
+    int child_exec_errno = 0;
+    int launch_pipe_read_errno = 0;
+    int executor_errno = 0;
+    int termination_value = 0;
+    ExecutorFailureStatus executor_failure_status = ExecutorFailureStatus::None;
+    ChildTerminationStatus child_termination_status = ChildTerminationStatus::None;
+    ChildLaunchStatus child_launch_status = ChildLaunchStatus::None;
+};
+
+JobParseResult parse_job(const nlohmann::json& job_json) {
+    JobParseResult result;
+
+    if (!job_json.is_object()) {
+        result.success = false;
+
+        result.error_message = "Job must be a JSON object.";
+
+        return result;
+    }
+
+    for (auto field = job_json.begin(); field != job_json.end(); ++field) {
+        if (!(field.key() == "executable" || field.key() == "arguments")) {
+            result.success = false;
+
+            result.error_message = "Unknown field: " + field.key();
+
+            return result;
+        }
+    }
+
+    if (!job_json.contains("executable")) {
+        result.success = false;
+
+        result.error_message = "Missing required field: executable";
+
+        return result;
+    }
+
+    if (!job_json["executable"].is_string()) {
+        result.success = false;
+
+        result.error_message = "Field 'executable' must be a string.";
+
+        return result;
+    }
+
+    std::string executable = job_json["executable"].get<std::string>();
+
+    if (executable.empty()) {
+        result.success = false;
+
+        result.error_message = "Field 'executable' cannot be empty.";
+
+        return result;
+    }
+
+    std::vector<std::string> arguments;
+
+    if (job_json.contains("arguments")) {
+        if (!job_json["arguments"].is_array()) {
+            result.success = false;
+
+            result.error_message = "Field 'arguments' must be an array.";
+
+            return result;
+        }
+
+        for (const auto& element : job_json["arguments"]) {
+            if (!element.is_string()) {
+                result.success = false;
+
+                result.error_message = "Each element of field 'arguments' must be a string.";
+
+                return result;
+            }
+
+            arguments.push_back(element.get<std::string>());
+        }
+    }
+
+    result.success = true;
+
+    result.job = {executable, arguments};
+
+    return result;
+}
+
+JobExecutionResult execute_job(const Job& job) {
+    JobExecutionResult result;
+
+    // Create argv
+    std::vector<std::string> argv_storage;
+    std::vector<char*> job_argv;
+
+    argv_storage.push_back(job.executable);
+
+    for (const std::string& argument : job.arguments) {
+        argv_storage.push_back(argument);
+    }
+
+    for (std::string& argument : argv_storage) {
+        job_argv.push_back(argument.data());
+    }
+
+    job_argv.push_back(nullptr);
+
+    int pipe_fds[2];
+
+    if (pipe2(pipe_fds, O_CLOEXEC) == -1) {
+        result.executor_errno = errno;
+        result.executor_failure_status = ExecutorFailureStatus::Pipe2Failed;
+
+        return result;
+    }
+
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        result.executor_errno = errno;
+        result.executor_failure_status = ExecutorFailureStatus::ForkFailed;
+
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+
+        return result;
+    }
+
+    else if (pid == 0) {
+        close(pipe_fds[0]);
+
+        execv(job.executable.data(), job_argv.data());
+
+        int child_exec_errno = errno;
+
+        const char* data = reinterpret_cast<const char*>(&child_exec_errno);
+        std::size_t total_written = 0;
+
+        while (total_written < sizeof(child_exec_errno)) {
+            const char* w_addr = data + total_written;
+            std::size_t w_size = sizeof(child_exec_errno) - total_written;
+            ssize_t written_size = write(pipe_fds[1], w_addr, w_size);
+
+            if (written_size > 0) {
+                total_written += written_size;
+
+                continue;
+            }
+
+            else if (written_size == -1) {
+                if (errno == EINTR) {
+                    continue;
+                }
+            }
+
+            break;
+        }
+
+        close(pipe_fds[1]);
+
+        _exit(EXIT_FAILURE);
+    }
+
+    else {
+        close(pipe_fds[1]);
+
+        int child_exec_errno;
+        int launch_pipe_read_errno;
+        bool read_failed = false;
+        char* data = reinterpret_cast<char*>(&child_exec_errno);
+
+        std::size_t total_read = 0;
+
+        while (total_read < sizeof(child_exec_errno)) {
+            char* r_addr = data + total_read;
+            std::size_t r_size = sizeof(child_exec_errno) - total_read;
+            ssize_t read_size = read(pipe_fds[0], r_addr, r_size);
+
+            if (read_size > 0) {
+                total_read += read_size;
+
+                continue;
+            }
+
+            else if (read_size == 0) {
+                break;
+            }
+
+            else if (read_size == -1) {
+                if (errno == EINTR) {
+                    continue;
+                }
+
+                launch_pipe_read_errno = errno;
+                read_failed = true;
+            }
+
+            break;
+        }
+
+        if (read_failed) {
+            result.launch_pipe_read_errno = launch_pipe_read_errno;
+            result.child_launch_status = ChildLaunchStatus::ReadFailed;
+        }
+
+        else if (total_read == sizeof(child_exec_errno)) {
+            result.child_exec_errno = child_exec_errno;
+            result.child_launch_status = ChildLaunchStatus::ExecFailed;
+        }
+
+        else if (total_read > 0) {
+            result.child_launch_status = ChildLaunchStatus::ProtocolError;
+        }
+
+        else {
+            result.child_launch_status = ChildLaunchStatus::Success;
+        }
+
+        close(pipe_fds[0]);
+
+        int status;
+
+        while (true) {
+            pid_t waited_pid = waitpid(pid, &status, 0);
+
+            if (waited_pid == -1) {
+                if (errno == EINTR) {
+                    continue;
+                }
+
+                result.executor_errno = errno;
+                result.executor_failure_status = ExecutorFailureStatus::WaitpidFailed;
+
+                return result;
+            }
+
+            if (WIFEXITED(status)) {
+                result.termination_value = WEXITSTATUS(status);
+                result.child_termination_status = ChildTerminationStatus::Exited;
+            }
+
+            else if (WIFSIGNALED(status)) {
+                result.termination_value = WTERMSIG(status);
+                result.child_termination_status = ChildTerminationStatus::Signaled;
+            }
+
+            break;
+        }
+
+        return result;
+    }
+}
+
+void print_job_execution_result(size_t index, const JobExecutionResult& result) {
+    std::cout << "Job " << index << ":" << std::endl;
+
+    switch (result.child_launch_status) {
+        case ChildLaunchStatus::Success:
+            std::cout << "Launch: success" << std::endl;
+            break;
+
+        case ChildLaunchStatus::ReadFailed:
+            std::cout << "Launch: error-report read failed" << std::endl;
+            std::cout << "Launch pipe read errno: " << result.launch_pipe_read_errno << std::endl;
+            break;
+
+        case ChildLaunchStatus::ExecFailed:
+            std::cout << "Launch: exec failed" << std::endl;
+            std::cout << "Child exec errno: " << result.child_exec_errno << std::endl;
+            break;
+
+        case ChildLaunchStatus::ProtocolError:
+            std::cout << "Launch: exec failed with incomplete error report" << std::endl;
+            break;
+
+        case ChildLaunchStatus::None:
+            break;
+    }
+
+    switch (result.child_termination_status) {
+        case ChildTerminationStatus::Exited:
+            std::cout << "Termination: exited" << std::endl;
+            std::cout << "Exit status: " << result.termination_value << std::endl;
+            break;
+
+        case ChildTerminationStatus::Signaled:
+            std::cout << "Termination: signaled" << std::endl;
+            std::cout << "Signal: " << result.termination_value << std::endl;
+            break;
+
+        case ChildTerminationStatus::None:
+            break;
+    }
+
+    switch (result.executor_failure_status) {
+        case ExecutorFailureStatus::Pipe2Failed:
+            std::cout << "Executor failure: pipe creation failed" << std::endl;
+            std::cout << "errno: " << result.executor_errno << std::endl;
+            break;
+
+        case ExecutorFailureStatus::ForkFailed:
+            std::cout << "Executor failure: fork failed" << std::endl;
+            std::cout << "errno: " << result.executor_errno << std::endl;
+            break;
+
+        case ExecutorFailureStatus::WaitpidFailed:
+            std::cout << "Executor failure: waitpid failed" << std::endl;
+            std::cout << "errno: " << result.executor_errno << std::endl;
+            break;
+
+        case ExecutorFailureStatus::None:
+            break;
+    }
+}
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
@@ -58,244 +393,39 @@ int main(int argc, char* argv[]) {
         std::exit(EXIT_FAILURE);
     }
 
-    if (!manifest_json.is_object()) {
+    if (!manifest_json.is_array()) {
         std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
 
-        std::cerr << "The top-level must be a JSON object." << std::endl;
+        std::cerr << "The top-level must be an array." << std::endl;
 
         std::exit(EXIT_FAILURE);
     }
 
-    for (auto field = manifest_json.begin(); field != manifest_json.end(); ++field) {
-        if (!(field.key() == "executable" || field.key() == "arguments")) {
+    std::vector<Job> jobs;
+
+    size_t index = 0;
+    for (const auto& job_json : manifest_json) {
+        JobParseResult result = parse_job(job_json);
+
+        if (!result.success) {
             std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
-
-            std::cerr << "Unknown field: " << field.key() << std::endl;
-
-            std::exit(EXIT_FAILURE);
-        }
-    }
-
-    if (!manifest_json.contains("executable")) {
-        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
-
-        std::cerr << "Missing required field: executable" << std::endl;
-
-        std::exit(EXIT_FAILURE);
-    }
-
-    if (!manifest_json["executable"].is_string()) {
-        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
-
-        std::cerr << "Field 'executable' must be a string." << std::endl;
-
-        std::exit(EXIT_FAILURE);
-    }
-
-    std::string executable = manifest_json["executable"].get<std::string>();
-
-    if (executable.empty()) {
-        std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
-
-        std::cerr << "Field 'executable' cannot be empty." << std::endl;
-
-        std::exit(EXIT_FAILURE);
-    }
-
-    std::vector<std::string> arguments;
-
-    if (manifest_json.contains("arguments")) {
-        if (!manifest_json["arguments"].is_array()) {
-            std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
-
-            std::cerr << "Field 'arguments' must be an array." << std::endl;
+            std::cerr << "Job " << index << ": " << result.error_message << std::endl;
 
             std::exit(EXIT_FAILURE);
         }
 
-        for (const auto& element : manifest_json["arguments"]) {
-            if (!element.is_string()) {
-                std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+        jobs.push_back(result.job);
 
-                std::cerr << "Each element of field 'arguments' must be a string." << std::endl;
-
-                std::exit(EXIT_FAILURE);
-            }
-
-            arguments.push_back(element.get<std::string>());
-        }
+        index++;
     }
 
-    int pipe_fds[2];
+    index = 0;
+    for (const Job& job : jobs) {
+        JobExecutionResult result = execute_job(job);
 
-    if (pipe2(pipe_fds, O_CLOEXEC) == -1) {
-        std::cerr << "Pipe created failed." << std::endl;
+        print_job_execution_result(index, result);
 
-        std::exit(EXIT_FAILURE);
-    }
-
-    Job job;
-    job.executable = executable;
-    job.arguments = arguments;
-
-    std::vector<char*> job_argv;
-
-    job_argv.push_back(job.executable.data());
-
-    for (std::string& argument : job.arguments) {
-        job_argv.push_back(argument.data());
-    }
-
-    job_argv.push_back(nullptr);
-
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        std::cerr << "Fork failed." << std::endl;
-
-        close(pipe_fds[0]);
-        close(pipe_fds[1]);
-
-        std::exit(EXIT_FAILURE);
-    }
-
-    else if (pid == 0) {
-        close(pipe_fds[0]);
-
-        execv(job.executable.data(), job_argv.data());
-
-        int exec_errno = errno;
-
-        const char* data = reinterpret_cast<const char*>(&exec_errno);
-        std::size_t total_written = 0;
-
-        while (total_written < sizeof(exec_errno)) {
-            const char* w_addr = data + total_written;
-            std::size_t w_size = sizeof(exec_errno) - total_written;
-            ssize_t written_size = write(pipe_fds[1], w_addr, w_size);
-
-            if (written_size > 0) {
-                total_written += written_size;
-
-                continue;
-            }
-
-            else if (written_size == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-            }
-
-            break;
-        }
-
-        close(pipe_fds[1]);
-
-        _exit(EXIT_FAILURE);
-    }
-
-    else {
-        int status;
-
-        close(pipe_fds[1]);
-
-        int exec_errno;
-        int read_errno;
-        bool read_failed = false;
-        char* data = reinterpret_cast<char*>(&exec_errno);
-
-        std::size_t total_read = 0;
-
-        while (total_read < sizeof(exec_errno)) {
-            char* r_addr = data + total_read;
-            std::size_t r_size = sizeof(exec_errno) - total_read;
-            ssize_t read_size = read(pipe_fds[0], r_addr, r_size);
-
-            if (read_size > 0) {
-                total_read += read_size;
-
-                continue;
-            }
-
-            else if (read_size == 0) {
-                break;
-            }
-
-            else if (read_size == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-
-                read_errno = errno;
-                read_failed = true;
-            }
-
-            break;
-        }
-
-        LaunchStatus launch_status;
-
-        if (read_failed) {
-            launch_status = LaunchStatus::ReadFailed;
-        }
-
-        else if (total_read == sizeof(exec_errno)) {
-            launch_status = LaunchStatus::ExecFailed;
-        }
-
-        else if (total_read > 0) {
-            launch_status = LaunchStatus::ProtocolError;
-        }
-
-        else {
-            launch_status = LaunchStatus::Success;
-        }
-
-        close(pipe_fds[0]);
-
-        while (true) {
-            pid_t waited_pid = waitpid(pid, &status, 0);
-
-            if (waited_pid == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-
-                std::cerr << "waitpid failed." << std::endl;
-
-                std::exit(EXIT_FAILURE);
-            }
-
-            if (WIFEXITED(status)) {
-                std::cout << "Exited, status: " << WEXITSTATUS(status) << std::endl;
-            }
-
-            else if (WIFSIGNALED(status)) {
-                std::cout << "Killed by signal, status: " << WTERMSIG(status) << std::endl;
-            }
-
-            break;
-        }
-
-        switch(launch_status) {
-            case LaunchStatus::Success:
-                std::cout << "LaunchStatus::Success" << std::endl;
-                break;
-
-            case LaunchStatus::ReadFailed:
-                std::cout << "LaunchStatus::ReadFailed" << std::endl;
-                std::cout << "read_errno 對應 " << read_errno << std::endl;
-                break;
-
-            case LaunchStatus::ExecFailed:
-                std::cout << "LaunchStatus::ExecFailed" << std::endl;
-                std::cout << "exec_errno 對應 " << exec_errno << std::endl;
-                break;
-
-            case LaunchStatus::ProtocolError:
-                std::cout << "LaunchStatus::ProtocolError" << std::endl;
-                break;
-        }
+        index++;
     }
 
     std::exit(EXIT_SUCCESS);

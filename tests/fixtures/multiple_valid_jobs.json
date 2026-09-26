@@ -1,0 +1,10 @@
+[
+    {
+        "executable": "/bin/echo",
+        "arguments": ["one"]
+    },
+    {
+        "executable": "/bin/echo",
+        "arguments": ["two"]
+    }
+]

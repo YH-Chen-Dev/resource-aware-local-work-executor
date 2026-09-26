@@ -1,3 +1,6 @@
-{
-    "executable": "/bin/echo"
-}
+[
+    {
+        "executable": "/bin/echo"
+    }
+]
+
