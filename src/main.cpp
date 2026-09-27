@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <utility>
+#include <charconv>
 
 enum class ManifestLoadStatus {
     Success,
@@ -37,6 +38,21 @@ enum class ChildLaunchStatus {
     ReadFailed,
     ProtocolError,
     None
+};
+
+struct ConcurrencyParseResult {
+    std::optional<std::size_t> value;
+    std::optional<std::string> error_message;
+};
+
+struct CliOptions {
+    std::string manifest_path;
+    std::size_t max_concurrency;
+};
+
+struct CliParseResult {
+    std::optional<CliOptions> options;
+    std::optional<std::string> error_message;
 };
 
 struct Job {
@@ -67,82 +83,66 @@ struct JobExecutionResult {
     ChildLaunchStatus child_launch_status = ChildLaunchStatus::None;
 };
 
-JobParseResult parse_job(const nlohmann::json& job_json) {
-    JobParseResult result;
+void print_job_execution_result(std::size_t index, const JobExecutionResult& result) {
+    std::cout << "Job " << index << ":" << std::endl;
 
-    if (!job_json.is_object()) {
-        result.success = false;
+    switch (result.child_launch_status) {
+        case ChildLaunchStatus::Success:
+            std::cout << "Launch: success" << std::endl;
+            break;
 
-        result.error_message = "Job must be a JSON object.";
+        case ChildLaunchStatus::ReadFailed:
+            std::cout << "Launch: error-report read failed" << std::endl;
+            std::cout << "Launch pipe read errno: " << result.launch_pipe_read_errno << std::endl;
+            break;
 
-        return result;
+        case ChildLaunchStatus::ExecFailed:
+            std::cout << "Launch: exec failed" << std::endl;
+            std::cout << "Child exec errno: " << result.child_exec_errno << std::endl;
+            break;
+
+        case ChildLaunchStatus::ProtocolError:
+            std::cout << "Launch: exec failed with incomplete error report" << std::endl;
+            break;
+
+        case ChildLaunchStatus::None:
+            break;
     }
 
-    for (auto field = job_json.begin(); field != job_json.end(); ++field) {
-        if (!(field.key() == "executable" || field.key() == "arguments")) {
-            result.success = false;
+    switch (result.child_termination_status) {
+        case ChildTerminationStatus::Exited:
+            std::cout << "Termination: exited" << std::endl;
+            std::cout << "Exit status: " << result.termination_value << std::endl;
+            break;
 
-            result.error_message = "Unknown field: " + field.key();
+        case ChildTerminationStatus::Signaled:
+            std::cout << "Termination: signaled" << std::endl;
+            std::cout << "Signal: " << result.termination_value << std::endl;
+            break;
 
-            return result;
-        }
+        case ChildTerminationStatus::None:
+            break;
     }
 
-    if (!job_json.contains("executable")) {
-        result.success = false;
+    switch (result.executor_failure_status) {
+        case ExecutorFailureStatus::Pipe2Failed:
+            std::cout << "Executor failure: pipe creation failed" << std::endl;
+            std::cout << "errno: " << result.executor_errno << std::endl;
+            break;
 
-        result.error_message = "Missing required field: executable";
+        case ExecutorFailureStatus::ForkFailed:
+            std::cout << "Executor failure: fork failed" << std::endl;
+            std::cout << "errno: " << result.executor_errno << std::endl;
+            break;
 
-        return result;
+        case ExecutorFailureStatus::WaitpidFailed:
+            std::cout << "Executor failure: waitpid failed" << std::endl;
+            std::cout << "errno: " << result.executor_errno << std::endl;
+            break;
+
+        case ExecutorFailureStatus::None:
+            break;
     }
-
-    if (!job_json["executable"].is_string()) {
-        result.success = false;
-
-        result.error_message = "Field 'executable' must be a string.";
-
-        return result;
-    }
-
-    std::string executable = job_json["executable"].get<std::string>();
-
-    if (executable.empty()) {
-        result.success = false;
-
-        result.error_message = "Field 'executable' cannot be empty.";
-
-        return result;
-    }
-
-    std::vector<std::string> arguments;
-
-    if (job_json.contains("arguments")) {
-        if (!job_json["arguments"].is_array()) {
-            result.success = false;
-
-            result.error_message = "Field 'arguments' must be an array.";
-
-            return result;
-        }
-
-        for (const auto& element : job_json["arguments"]) {
-            if (!element.is_string()) {
-                result.success = false;
-
-                result.error_message = "Each element of field 'arguments' must be a string.";
-
-                return result;
-            }
-
-            arguments.push_back(element.get<std::string>());
-        }
-    }
-
-    result.success = true;
-
-    result.job = {executable, arguments};
-
-    return result;
 }
 
 JobExecutionResult execute_job(const Job& job) {
@@ -310,64 +310,106 @@ JobExecutionResult execute_job(const Job& job) {
     }
 }
 
-void print_job_execution_result(std::size_t index, const JobExecutionResult& result) {
-    std::cout << "Job " << index << ":" << std::endl;
+JobParseResult parse_job(const nlohmann::json& job_json) {
+    JobParseResult result;
 
-    switch (result.child_launch_status) {
-        case ChildLaunchStatus::Success:
-            std::cout << "Launch: success" << std::endl;
-            break;
+    if (!job_json.is_object()) {
+        result.success = false;
 
-        case ChildLaunchStatus::ReadFailed:
-            std::cout << "Launch: error-report read failed" << std::endl;
-            std::cout << "Launch pipe read errno: " << result.launch_pipe_read_errno << std::endl;
-            break;
+        result.error_message = "Job must be a JSON object.";
 
-        case ChildLaunchStatus::ExecFailed:
-            std::cout << "Launch: exec failed" << std::endl;
-            std::cout << "Child exec errno: " << result.child_exec_errno << std::endl;
-            break;
-
-        case ChildLaunchStatus::ProtocolError:
-            std::cout << "Launch: exec failed with incomplete error report" << std::endl;
-            break;
-
-        case ChildLaunchStatus::None:
-            break;
+        return result;
     }
 
-    switch (result.child_termination_status) {
-        case ChildTerminationStatus::Exited:
-            std::cout << "Termination: exited" << std::endl;
-            std::cout << "Exit status: " << result.termination_value << std::endl;
-            break;
+    for (auto field = job_json.begin(); field != job_json.end(); ++field) {
+        if (!(field.key() == "executable" || field.key() == "arguments")) {
+            result.success = false;
 
-        case ChildTerminationStatus::Signaled:
-            std::cout << "Termination: signaled" << std::endl;
-            std::cout << "Signal: " << result.termination_value << std::endl;
-            break;
+            result.error_message = "Unknown field: " + field.key();
 
-        case ChildTerminationStatus::None:
-            break;
+            return result;
+        }
     }
 
-    switch (result.executor_failure_status) {
-        case ExecutorFailureStatus::Pipe2Failed:
-            std::cout << "Executor failure: pipe creation failed" << std::endl;
-            std::cout << "errno: " << result.executor_errno << std::endl;
+    if (!job_json.contains("executable")) {
+        result.success = false;
+
+        result.error_message = "Missing required field: executable";
+
+        return result;
+    }
+
+    if (!job_json["executable"].is_string()) {
+        result.success = false;
+
+        result.error_message = "Field 'executable' must be a string.";
+
+        return result;
+    }
+
+    std::string executable = job_json["executable"].get<std::string>();
+
+    if (executable.empty()) {
+        result.success = false;
+
+        result.error_message = "Field 'executable' cannot be empty.";
+
+        return result;
+    }
+
+    std::vector<std::string> arguments;
+
+    if (job_json.contains("arguments")) {
+        if (!job_json["arguments"].is_array()) {
+            result.success = false;
+
+            result.error_message = "Field 'arguments' must be an array.";
+
+            return result;
+        }
+
+        for (const auto& element : job_json["arguments"]) {
+            if (!element.is_string()) {
+                result.success = false;
+
+                result.error_message = "Each element of field 'arguments' must be a string.";
+
+                return result;
+            }
+
+            arguments.push_back(element.get<std::string>());
+        }
+    }
+
+    result.success = true;
+
+    result.job = {executable, arguments};
+
+    return result;
+}
+
+void print_manifest_load_error(const std::string& manifest_path, const ManifestLoadResult& result) {
+    switch (result.manifest_load_status) {
+        case ManifestLoadStatus::FileOpenFailed:
+            std::cerr << "Error: failed to open manifest file: " << manifest_path << std::endl;
             break;
 
-        case ExecutorFailureStatus::ForkFailed:
-            std::cout << "Executor failure: fork failed" << std::endl;
-            std::cout << "errno: " << result.executor_errno << std::endl;
+        case ManifestLoadStatus::JsonParseFailed:
+            std::cerr << "Error: failed to parse manifest file: " << manifest_path << std::endl;
+            std::cerr << result.error_message << std::endl;
             break;
 
-        case ExecutorFailureStatus::WaitpidFailed:
-            std::cout << "Executor failure: waitpid failed" << std::endl;
-            std::cout << "errno: " << result.executor_errno << std::endl;
+        case ManifestLoadStatus::SchemaInvalid:
+            std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+
+            if (result.job_index.has_value()) {
+                std::cerr << "Job " << *result.job_index << ": ";
+            }
+
+            std::cerr << result.error_message << std::endl;
             break;
 
-        case ExecutorFailureStatus::None:
+        case ManifestLoadStatus::Success:
             break;
     }
 }
@@ -432,53 +474,88 @@ ManifestLoadResult load_manifest(const std::string& manifest_path) {
     return manifest_load_result;
 }
 
-void print_manifest_load_error(const std::string& manifest_path, const ManifestLoadResult& result) {
-    switch (result.manifest_load_status) {
-        case ManifestLoadStatus::FileOpenFailed:
-            std::cerr << "Error: failed to open manifest file: " << manifest_path << std::endl;
-            break;
+void print_cli_error(const CliParseResult& result) {
+    std::cerr << "Error: " << *result.error_message << std::endl;
+    std::cerr << "Usage: work_executor <manifest-path> --concurrency <N>" << std::endl;
+}
 
-        case ManifestLoadStatus::JsonParseFailed:
-            std::cerr << "Error: failed to parse manifest file: " << manifest_path << std::endl;
-            std::cerr << result.error_message << std::endl;
-            break;
+ConcurrencyParseResult parse_concurrency(const std::string& text) {
+    ConcurrencyParseResult concurrency_parse_result;
 
-        case ManifestLoadStatus::SchemaInvalid:
-            std::cerr << "Error: invalid manifest schema: " << manifest_path << std::endl;
+    std::size_t value;
 
-            if (result.job_index.has_value()) {
-                std::cerr << "Job " << *result.job_index << ": ";
-            }
+    auto convert_result = std::from_chars(text.data(), text.data() + text.size(), value);
 
-            std::cerr << result.error_message << std::endl;
-            break;
+    if (convert_result.ec == std::errc::result_out_of_range) {
+        concurrency_parse_result.error_message = "Concurrency value is out of range.";
 
-        case ManifestLoadStatus::Success:
-            break;
+        return concurrency_parse_result;
     }
+
+    if (convert_result.ec != std::errc{} || convert_result.ptr != text.data() + text.size()) {
+        concurrency_parse_result.error_message = "Concurrency value is invalid.";
+
+        return concurrency_parse_result;
+    }
+
+    if (value == 0) {
+        concurrency_parse_result.error_message = "Concurrency must be greater than zero.";
+
+        return concurrency_parse_result;
+    }
+
+    concurrency_parse_result.value = value;
+
+    return concurrency_parse_result;
+}
+
+CliParseResult parse_cli(int argc, char* argv[]) {
+    CliParseResult cli_parse_result;
+
+    if (argc != 4) {
+        if (argc < 4) {
+            cli_parse_result.error_message = "missing required command-line arguments.";
+        }
+
+        else if (argc > 4) {
+            cli_parse_result.error_message = "unexpected command-line arguments.";
+        }
+
+        return cli_parse_result;
+    }
+
+    if (std::string(argv[2]) != "--concurrency") {
+        cli_parse_result.error_message = "expected \"--concurrency\" argument.";
+
+        return cli_parse_result;
+    }
+
+    ConcurrencyParseResult concurrency_parse_result = parse_concurrency(argv[3]);
+
+    if (!concurrency_parse_result.value.has_value()) {
+        cli_parse_result.error_message = concurrency_parse_result.error_message;
+
+        return cli_parse_result;
+    }
+
+    cli_parse_result.options = CliOptions {argv[1], *concurrency_parse_result.value};
+
+    return cli_parse_result;
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        if (argc < 2) {
-            std::cerr << "Error: missing manifest file path." << std::endl;
-        }
+    CliParseResult cli_parse_result = parse_cli(argc, argv);
 
-        else if (argc > 2) {
-            std::cerr << "Error: unexpected command-line arguments." << std::endl;
-        }
-
-        std::cerr << "Usage: work_executor <manifest-path>" << std::endl;
+    if (!cli_parse_result.options.has_value()) {
+        print_cli_error(cli_parse_result);
 
         std::exit(EXIT_FAILURE);
     }
 
-    const std::string manifest_path = argv[1];
-
-    ManifestLoadResult manifest_load_result = load_manifest(manifest_path);
+    ManifestLoadResult manifest_load_result = load_manifest(cli_parse_result.options->manifest_path);
 
     if (manifest_load_result.manifest_load_status != ManifestLoadStatus::Success) {
-        print_manifest_load_error(manifest_path, manifest_load_result);
+        print_manifest_load_error(cli_parse_result.options->manifest_path, manifest_load_result);
 
         std::exit(EXIT_FAILURE);
     }

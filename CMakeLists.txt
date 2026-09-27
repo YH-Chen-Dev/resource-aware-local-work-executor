@@ -26,14 +26,14 @@ target_link_libraries(
 
 enable_testing()
 
-# missing_manifest_path
+# missing_manifest_arguments
 add_test(
-    NAME missing_manifest_path
+    NAME missing_manifest_arguments
     COMMAND work_executor
 )
 
 set_tests_properties(
-    missing_manifest_path
+    missing_manifest_arguments
     PROPERTIES
     WILL_FAIL TRUE
 )
@@ -41,7 +41,7 @@ set_tests_properties(
 # nonexistent_manifest_file
 add_test(
     NAME nonexistent_manifest_file
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/does_not_exist.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/does_not_exist.json --concurrency 1
 )
 
 set_tests_properties(
@@ -53,7 +53,7 @@ set_tests_properties(
 # too_many_arguments
 add_test(
     NAME too_many_arguments
-    COMMAND work_executor a.json b.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency 1 extra
 )
 
 set_tests_properties(
@@ -65,19 +65,19 @@ set_tests_properties(
 # valid_manifest
 add_test(
     NAME valid_manifest
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency 1
 )
 
 # valid_manifest_no_arguments
 add_test(
     NAME valid_manifest_no_arguments
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest_no_arguments.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest_no_arguments.json --concurrency 1
 )
 
 # top_level_object
 add_test(
     NAME top_level_object
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/top_level_object.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/top_level_object.json --concurrency 1
 )
 
 set_tests_properties(
@@ -89,7 +89,7 @@ set_tests_properties(
 # missing_executable
 add_test(
     NAME missing_executable
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/missing_executable.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/missing_executable.json --concurrency 1
 )
 
 set_tests_properties(
@@ -101,7 +101,7 @@ set_tests_properties(
 # executable_wrong_type
 add_test(
     NAME executable_wrong_type
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/executable_wrong_type.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/executable_wrong_type.json --concurrency 1
 )
 
 set_tests_properties(
@@ -113,7 +113,7 @@ set_tests_properties(
 # executable_empty
 add_test(
     NAME executable_empty
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/executable_empty.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/executable_empty.json --concurrency 1
 )
 
 set_tests_properties(
@@ -125,7 +125,7 @@ set_tests_properties(
 # arguments_wrong_type
 add_test(
     NAME arguments_wrong_type
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/arguments_wrong_type.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/arguments_wrong_type.json --concurrency 1
 )
 
 set_tests_properties(
@@ -137,7 +137,7 @@ set_tests_properties(
 # argument_element_wrong_type
 add_test(
     NAME argument_element_wrong_type
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/argument_element_wrong_type.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/argument_element_wrong_type.json --concurrency 1
 )
 
 set_tests_properties(
@@ -149,7 +149,7 @@ set_tests_properties(
 # unknown_field
 add_test(
     NAME unknown_field
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/unknown_field.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/unknown_field.json --concurrency 1
 )
 
 set_tests_properties(
@@ -161,7 +161,7 @@ set_tests_properties(
 # empty_manifest
 add_test(
     NAME empty_manifest
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/empty_manifest.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/empty_manifest.json --concurrency 1
 )
 
 set_tests_properties(
@@ -173,7 +173,7 @@ set_tests_properties(
 # malformed_manifest
 add_test(
     NAME malformed_manifest
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/malformed_manifest.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/malformed_manifest.json --concurrency 1
 )
 
 set_tests_properties(
@@ -185,13 +185,13 @@ set_tests_properties(
 # empty_job_list
 add_test(
     NAME empty_job_list
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/empty_job_list.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/empty_job_list.json --concurrency 1
 )
 
 # multiple_valid_jobs
 add_test(
     NAME multiple_valid_jobs
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/multiple_valid_jobs.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/multiple_valid_jobs.json --concurrency 1
 )
 
 set_tests_properties(
@@ -203,7 +203,7 @@ set_tests_properties(
 # later_invalid_job
 add_test(
     NAME later_invalid_job
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/later_invalid_job.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/later_invalid_job.json --concurrency 1
 )
 
 set_tests_properties(
@@ -216,7 +216,7 @@ set_tests_properties(
 # nonexistent_executable
 add_test(
     NAME nonexistent_executable
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/nonexistent_executable.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/nonexistent_executable.json --concurrency 1
 )
 
 set_tests_properties(
@@ -228,11 +228,125 @@ set_tests_properties(
 # job_element_not_object
 add_test(
     NAME job_element_not_object
-    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/job_element_not_object.json
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/job_element_not_object.json --concurrency 1
 )
 
 set_tests_properties(
     job_element_not_object
     PROPERTIES
     WILL_FAIL TRUE
+)
+
+# wrong_option_name
+add_test(
+    NAME wrong_option_name
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --workers 4
+)
+
+set_tests_properties(
+    wrong_option_name
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# zero_concurrency
+add_test(
+    NAME zero_concurrency
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency 0
+)
+
+set_tests_properties(
+    zero_concurrency
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# invalid_format
+add_test(
+    NAME invalid_format
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency abc
+)
+
+set_tests_properties(
+    invalid_format
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# negative
+add_test(
+    NAME negative
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency -1
+)
+
+set_tests_properties(
+    negative
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# plus_sign
+add_test(
+    NAME plus_sign
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency +4
+)
+
+set_tests_properties(
+    plus_sign
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# trailing_characters
+add_test(
+    NAME trailing_characters
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency 4abc
+)
+
+set_tests_properties(
+    trailing_characters
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# leading_whitespace
+add_test(
+    NAME leading_whitespace
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency " 4"
+)
+
+set_tests_properties(
+    leading_whitespace
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# trailing_whitespace
+add_test(
+    NAME trailing_whitespace
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency "4 "
+)
+
+set_tests_properties(
+    trailing_whitespace
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# out_of_range
+add_test(
+    NAME out_of_range
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency 9999999999999999999999999999999999999999999999999
+)
+
+set_tests_properties(
+    out_of_range
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# leading_zero
+add_test(
+    NAME leading_zero
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_manifest.json --concurrency 04
 )
