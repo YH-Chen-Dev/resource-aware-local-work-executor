@@ -63,21 +63,20 @@ struct Job {
 struct ManifestLoadResult {
     ManifestLoadStatus manifest_load_status = ManifestLoadStatus::Success;
     std::vector<Job> jobs;
-    std::string error_message;
+    std::optional<std::string> error_message;
     std::optional<std::size_t> job_index;
 };
 
 struct JobParseResult {
-    bool success;
-    Job job;
-    std::string error_message;
+    std::optional<Job> job;
+    std::optional<std::string> error_message;
 };
 
 struct JobExecutionResult {
-    int child_exec_errno = 0;
-    int launch_pipe_read_errno = 0;
-    int executor_errno = 0;
-    int termination_value = 0;
+    std::optional<int> child_exec_errno;
+    std::optional<int> launch_pipe_read_errno;
+    std::optional<int> executor_errno;
+    std::optional<int> termination_value;
     ExecutorFailureStatus executor_failure_status = ExecutorFailureStatus::None;
     ChildTerminationStatus child_termination_status = ChildTerminationStatus::None;
     ChildLaunchStatus child_launch_status = ChildLaunchStatus::None;
@@ -93,12 +92,12 @@ void print_job_execution_result(std::size_t index, const JobExecutionResult& res
 
         case ChildLaunchStatus::ReadFailed:
             std::cout << "Launch: error-report read failed" << std::endl;
-            std::cout << "Launch pipe read errno: " << result.launch_pipe_read_errno << std::endl;
+            std::cout << "Launch pipe read errno: " << *result.launch_pipe_read_errno << std::endl;
             break;
 
         case ChildLaunchStatus::ExecFailed:
             std::cout << "Launch: exec failed" << std::endl;
-            std::cout << "Child exec errno: " << result.child_exec_errno << std::endl;
+            std::cout << "Child exec errno: " << *result.child_exec_errno << std::endl;
             break;
 
         case ChildLaunchStatus::ProtocolError:
@@ -112,12 +111,12 @@ void print_job_execution_result(std::size_t index, const JobExecutionResult& res
     switch (result.child_termination_status) {
         case ChildTerminationStatus::Exited:
             std::cout << "Termination: exited" << std::endl;
-            std::cout << "Exit status: " << result.termination_value << std::endl;
+            std::cout << "Exit status: " << *result.termination_value << std::endl;
             break;
 
         case ChildTerminationStatus::Signaled:
             std::cout << "Termination: signaled" << std::endl;
-            std::cout << "Signal: " << result.termination_value << std::endl;
+            std::cout << "Signal: " << *result.termination_value << std::endl;
             break;
 
         case ChildTerminationStatus::None:
@@ -127,17 +126,17 @@ void print_job_execution_result(std::size_t index, const JobExecutionResult& res
     switch (result.executor_failure_status) {
         case ExecutorFailureStatus::Pipe2Failed:
             std::cout << "Executor failure: pipe creation failed" << std::endl;
-            std::cout << "errno: " << result.executor_errno << std::endl;
+            std::cout << "errno: " << *result.executor_errno << std::endl;
             break;
 
         case ExecutorFailureStatus::ForkFailed:
             std::cout << "Executor failure: fork failed" << std::endl;
-            std::cout << "errno: " << result.executor_errno << std::endl;
+            std::cout << "errno: " << *result.executor_errno << std::endl;
             break;
 
         case ExecutorFailureStatus::WaitpidFailed:
             std::cout << "Executor failure: waitpid failed" << std::endl;
-            std::cout << "errno: " << result.executor_errno << std::endl;
+            std::cout << "errno: " << *result.executor_errno << std::endl;
             break;
 
         case ExecutorFailureStatus::None:
@@ -314,8 +313,6 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
     JobParseResult result;
 
     if (!job_json.is_object()) {
-        result.success = false;
-
         result.error_message = "Job must be a JSON object.";
 
         return result;
@@ -323,8 +320,6 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
 
     for (auto field = job_json.begin(); field != job_json.end(); ++field) {
         if (!(field.key() == "executable" || field.key() == "arguments")) {
-            result.success = false;
-
             result.error_message = "Unknown field: " + field.key();
 
             return result;
@@ -332,16 +327,12 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
     }
 
     if (!job_json.contains("executable")) {
-        result.success = false;
-
         result.error_message = "Missing required field: executable";
 
         return result;
     }
 
     if (!job_json["executable"].is_string()) {
-        result.success = false;
-
         result.error_message = "Field 'executable' must be a string.";
 
         return result;
@@ -350,8 +341,6 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
     std::string executable = job_json["executable"].get<std::string>();
 
     if (executable.empty()) {
-        result.success = false;
-
         result.error_message = "Field 'executable' cannot be empty.";
 
         return result;
@@ -361,8 +350,6 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
 
     if (job_json.contains("arguments")) {
         if (!job_json["arguments"].is_array()) {
-            result.success = false;
-
             result.error_message = "Field 'arguments' must be an array.";
 
             return result;
@@ -370,8 +357,6 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
 
         for (const auto& element : job_json["arguments"]) {
             if (!element.is_string()) {
-                result.success = false;
-
                 result.error_message = "Each element of field 'arguments' must be a string.";
 
                 return result;
@@ -381,9 +366,7 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
         }
     }
 
-    result.success = true;
-
-    result.job = {executable, arguments};
+    result.job = Job {executable, arguments};
 
     return result;
 }
@@ -396,7 +379,7 @@ void print_manifest_load_error(const std::string& manifest_path, const ManifestL
 
         case ManifestLoadStatus::JsonParseFailed:
             std::cerr << "Error: failed to parse manifest file: " << manifest_path << std::endl;
-            std::cerr << result.error_message << std::endl;
+            std::cerr << *result.error_message << std::endl;
             break;
 
         case ManifestLoadStatus::SchemaInvalid:
@@ -406,7 +389,7 @@ void print_manifest_load_error(const std::string& manifest_path, const ManifestL
                 std::cerr << "Job " << *result.job_index << ": ";
             }
 
-            std::cerr << result.error_message << std::endl;
+            std::cerr << *result.error_message << std::endl;
             break;
 
         case ManifestLoadStatus::Success:
@@ -452,7 +435,7 @@ ManifestLoadResult load_manifest(const std::string& manifest_path) {
     for (const auto& job_json : manifest_json) {
         JobParseResult job_parse_result = parse_job(job_json);
 
-        if (!job_parse_result.success) {
+        if (!job_parse_result.job.has_value()) {
             manifest_load_result.manifest_load_status = ManifestLoadStatus::SchemaInvalid;
 
             manifest_load_result.error_message = job_parse_result.error_message;
@@ -462,7 +445,7 @@ ManifestLoadResult load_manifest(const std::string& manifest_path) {
             return manifest_load_result;
         }
 
-        jobs.push_back(job_parse_result.job);
+        jobs.push_back(std::move(*job_parse_result.job));
 
         index++;
     }
