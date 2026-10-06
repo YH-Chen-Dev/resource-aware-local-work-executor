@@ -1,9 +1,6 @@
+#include "scheduler.hpp"
 #include <iostream>
 #include <cstdlib>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/wait.h>
-#include <cerrno>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -17,27 +14,6 @@ enum class ManifestLoadStatus {
     FileOpenFailed,
     JsonParseFailed,
     SchemaInvalid
-};
-
-enum class ExecutorFailureStatus {
-    Pipe2Failed,
-    ForkFailed,
-    WaitpidFailed,
-    None
-};
-
-enum class ChildTerminationStatus {
-    Exited,
-    Signaled,
-    None
-};
-
-enum class ChildLaunchStatus {
-    Success,
-    ExecFailed,
-    ReadFailed,
-    ProtocolError,
-    None
 };
 
 struct ConcurrencyParseResult {
@@ -55,11 +31,6 @@ struct CliParseResult {
     std::optional<std::string> error_message;
 };
 
-struct Job {
-    std::string executable;
-    std::vector<std::string> arguments;
-};
-
 struct ManifestLoadResult {
     ManifestLoadStatus manifest_load_status = ManifestLoadStatus::Success;
     std::vector<Job> jobs;
@@ -71,243 +42,6 @@ struct JobParseResult {
     std::optional<Job> job;
     std::optional<std::string> error_message;
 };
-
-struct JobExecutionResult {
-    std::optional<int> child_exec_errno;
-    std::optional<int> launch_pipe_read_errno;
-    std::optional<int> executor_errno;
-    std::optional<int> termination_value;
-    ExecutorFailureStatus executor_failure_status = ExecutorFailureStatus::None;
-    ChildTerminationStatus child_termination_status = ChildTerminationStatus::None;
-    ChildLaunchStatus child_launch_status = ChildLaunchStatus::None;
-};
-
-void print_job_execution_result(std::size_t index, const JobExecutionResult& result) {
-    std::cout << "Job " << index << ":" << std::endl;
-
-    switch (result.child_launch_status) {
-        case ChildLaunchStatus::Success:
-            std::cout << "Launch: success" << std::endl;
-            break;
-
-        case ChildLaunchStatus::ReadFailed:
-            std::cout << "Launch: error-report read failed" << std::endl;
-            std::cout << "Launch pipe read errno: " << *result.launch_pipe_read_errno << std::endl;
-            break;
-
-        case ChildLaunchStatus::ExecFailed:
-            std::cout << "Launch: exec failed" << std::endl;
-            std::cout << "Child exec errno: " << *result.child_exec_errno << std::endl;
-            break;
-
-        case ChildLaunchStatus::ProtocolError:
-            std::cout << "Launch: exec failed with incomplete error report" << std::endl;
-            break;
-
-        case ChildLaunchStatus::None:
-            break;
-    }
-
-    switch (result.child_termination_status) {
-        case ChildTerminationStatus::Exited:
-            std::cout << "Termination: exited" << std::endl;
-            std::cout << "Exit status: " << *result.termination_value << std::endl;
-            break;
-
-        case ChildTerminationStatus::Signaled:
-            std::cout << "Termination: signaled" << std::endl;
-            std::cout << "Signal: " << *result.termination_value << std::endl;
-            break;
-
-        case ChildTerminationStatus::None:
-            break;
-    }
-
-    switch (result.executor_failure_status) {
-        case ExecutorFailureStatus::Pipe2Failed:
-            std::cout << "Executor failure: pipe creation failed" << std::endl;
-            std::cout << "errno: " << *result.executor_errno << std::endl;
-            break;
-
-        case ExecutorFailureStatus::ForkFailed:
-            std::cout << "Executor failure: fork failed" << std::endl;
-            std::cout << "errno: " << *result.executor_errno << std::endl;
-            break;
-
-        case ExecutorFailureStatus::WaitpidFailed:
-            std::cout << "Executor failure: waitpid failed" << std::endl;
-            std::cout << "errno: " << *result.executor_errno << std::endl;
-            break;
-
-        case ExecutorFailureStatus::None:
-            break;
-    }
-}
-
-JobExecutionResult execute_job(const Job& job) {
-    JobExecutionResult result;
-
-    // Create argv
-    std::vector<std::string> argv_storage;
-    std::vector<char*> job_argv;
-
-    argv_storage.push_back(job.executable);
-
-    for (const std::string& argument : job.arguments) {
-        argv_storage.push_back(argument);
-    }
-
-    for (std::string& argument : argv_storage) {
-        job_argv.push_back(argument.data());
-    }
-
-    job_argv.push_back(nullptr);
-
-    int pipe_fds[2];
-
-    if (pipe2(pipe_fds, O_CLOEXEC) == -1) {
-        result.executor_errno = errno;
-        result.executor_failure_status = ExecutorFailureStatus::Pipe2Failed;
-
-        return result;
-    }
-
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        result.executor_errno = errno;
-        result.executor_failure_status = ExecutorFailureStatus::ForkFailed;
-
-        close(pipe_fds[0]);
-        close(pipe_fds[1]);
-
-        return result;
-    }
-
-    else if (pid == 0) {
-        close(pipe_fds[0]);
-
-        execv(job.executable.data(), job_argv.data());
-
-        int child_exec_errno = errno;
-
-        const char* data = reinterpret_cast<const char*>(&child_exec_errno);
-        std::size_t total_written = 0;
-
-        while (total_written < sizeof(child_exec_errno)) {
-            const char* w_addr = data + total_written;
-            std::size_t w_size = sizeof(child_exec_errno) - total_written;
-            ssize_t written_size = write(pipe_fds[1], w_addr, w_size);
-
-            if (written_size > 0) {
-                total_written += written_size;
-
-                continue;
-            }
-
-            else if (written_size == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-            }
-
-            break;
-        }
-
-        close(pipe_fds[1]);
-
-        _exit(EXIT_FAILURE);
-    }
-
-    else {
-        close(pipe_fds[1]);
-
-        int child_exec_errno;
-        int launch_pipe_read_errno;
-        bool read_failed = false;
-        char* data = reinterpret_cast<char*>(&child_exec_errno);
-
-        std::size_t total_read = 0;
-
-        while (total_read < sizeof(child_exec_errno)) {
-            char* r_addr = data + total_read;
-            std::size_t r_size = sizeof(child_exec_errno) - total_read;
-            ssize_t read_size = read(pipe_fds[0], r_addr, r_size);
-
-            if (read_size > 0) {
-                total_read += read_size;
-
-                continue;
-            }
-
-            else if (read_size == 0) {
-                break;
-            }
-
-            else if (read_size == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-
-                launch_pipe_read_errno = errno;
-                read_failed = true;
-            }
-
-            break;
-        }
-
-        if (read_failed) {
-            result.launch_pipe_read_errno = launch_pipe_read_errno;
-            result.child_launch_status = ChildLaunchStatus::ReadFailed;
-        }
-
-        else if (total_read == sizeof(child_exec_errno)) {
-            result.child_exec_errno = child_exec_errno;
-            result.child_launch_status = ChildLaunchStatus::ExecFailed;
-        }
-
-        else if (total_read > 0) {
-            result.child_launch_status = ChildLaunchStatus::ProtocolError;
-        }
-
-        else {
-            result.child_launch_status = ChildLaunchStatus::Success;
-        }
-
-        close(pipe_fds[0]);
-
-        int status;
-
-        while (true) {
-            pid_t waited_pid = waitpid(pid, &status, 0);
-
-            if (waited_pid == -1) {
-                if (errno == EINTR) {
-                    continue;
-                }
-
-                result.executor_errno = errno;
-                result.executor_failure_status = ExecutorFailureStatus::WaitpidFailed;
-
-                return result;
-            }
-
-            if (WIFEXITED(status)) {
-                result.termination_value = WEXITSTATUS(status);
-                result.child_termination_status = ChildTerminationStatus::Exited;
-            }
-
-            else if (WIFSIGNALED(status)) {
-                result.termination_value = WTERMSIG(status);
-                result.child_termination_status = ChildTerminationStatus::Signaled;
-            }
-
-            break;
-        }
-
-        return result;
-    }
-}
 
 JobParseResult parse_job(const nlohmann::json& job_json) {
     JobParseResult result;
@@ -543,13 +277,12 @@ int main(int argc, char* argv[]) {
         std::exit(EXIT_FAILURE);
     }
 
-    std::size_t index = 0;
-    for (const Job& job : manifest_load_result.jobs) {
-        JobExecutionResult job_execution_result = execute_job(job);
+    SchedulerResult scheduler_result = scheduler(manifest_load_result.jobs, cli_parse_result.options->max_concurrency);
 
-        print_job_execution_result(index, job_execution_result);
+    if (scheduler_result.scheduler_status != SchedulerStatus::Success || !scheduler_result.job_infrastructure_failures.empty()) {
+        print_scheduler_error(scheduler_result);
 
-        index++;
+        std::exit(EXIT_FAILURE);
     }
 
     std::exit(EXIT_SUCCESS);

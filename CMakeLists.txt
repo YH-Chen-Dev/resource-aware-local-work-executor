@@ -14,6 +14,16 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(json)
 
+add_library(scheduler_core
+    src/scheduler.cpp
+)
+
+target_include_directories(
+    scheduler_core
+    PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 add_executable(work_executor
     src/main.cpp
 )
@@ -21,10 +31,93 @@ add_executable(work_executor
 target_link_libraries(
     work_executor
     PRIVATE
+    scheduler_core
     nlohmann_json::nlohmann_json
 )
 
+add_executable(scheduler_concurrency_test
+    tests/scheduler_concurrency_test.cpp
+)
+
+target_link_libraries(
+    scheduler_concurrency_test
+    PRIVATE
+    scheduler_core
+)
+
+add_executable(scheduler_invalid_concurrency_test
+    tests/scheduler_invalid_concurrency_test.cpp
+)
+
+target_link_libraries(
+    scheduler_invalid_concurrency_test
+    PRIVATE
+    scheduler_core
+)
+
+add_executable(scheduler_cleanup_test
+    tests/scheduler_cleanup_test.cpp
+)
+
+target_link_libraries(
+    scheduler_cleanup_test
+    PRIVATE
+    scheduler_core
+)
+
 enable_testing()
+
+# scheduler_concurrency
+add_test(
+    NAME scheduler_concurrency
+    COMMAND scheduler_concurrency_test
+)
+
+set_tests_properties(
+    scheduler_concurrency
+    PROPERTIES
+    TIMEOUT 10
+)
+
+# scheduler_invalid_concurrency
+add_test(
+    NAME scheduler_invalid_concurrency
+    COMMAND scheduler_invalid_concurrency_test
+)
+
+set_tests_properties(
+    scheduler_invalid_concurrency
+    PROPERTIES
+    TIMEOUT 5
+)
+
+# scheduler_cleanup_test
+add_test(
+    NAME scheduler_cleanup_test
+    COMMAND scheduler_cleanup_test
+)
+
+set_tests_properties(
+    scheduler_cleanup_test
+    PROPERTIES
+    TIMEOUT 10
+)
+
+# executor_concurrency_integration
+add_test(
+    NAME executor_concurrency_integration
+    COMMAND
+        /bin/sh
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/concurrency_integration_test.sh
+        $<TARGET_FILE:work_executor>
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/concurrency_manifest.json
+)
+
+set_tests_properties(
+    executor_concurrency_integration
+    PROPERTIES
+    TIMEOUT 10
+)
 
 # missing_manifest_arguments
 add_test(

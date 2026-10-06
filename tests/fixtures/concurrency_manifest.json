@@ -1,0 +1,23 @@
+[
+    {
+        "executable": "/bin/sh",
+        "arguments": [
+            "-c",
+            "touch J0_started && read message < test_gate0 && touch J0_done"
+        ]
+    },
+    {
+        "executable": "/bin/sh",
+        "arguments": [
+            "-c",
+            "touch J1_started && read message < test_gate1 && touch J1_done"
+        ]
+    },
+    {
+        "executable": "/bin/sh",
+        "arguments": [
+            "-c",
+            "touch J2_started && touch J2_done"
+        ]
+    }
+]
