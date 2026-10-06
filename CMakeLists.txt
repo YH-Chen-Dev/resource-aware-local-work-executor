@@ -203,6 +203,18 @@ set_tests_properties(
     WILL_FAIL TRUE
 )
 
+# executable_contains_nul
+add_test(
+    NAME executable_contains_nul
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/executable_contains_nul.json --concurrency 1
+)
+
+set_tests_properties(
+    executable_contains_nul
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
 # executable_empty
 add_test(
     NAME executable_empty
@@ -235,6 +247,18 @@ add_test(
 
 set_tests_properties(
     argument_element_wrong_type
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# argument_contains_nul
+add_test(
+    NAME argument_contains_nul
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/argument_contains_nul.json --concurrency 1
+)
+
+set_tests_properties(
+    argument_contains_nul
     PROPERTIES
     WILL_FAIL TRUE
 )

@@ -74,6 +74,12 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
 
     std::string executable = job_json["executable"].get<std::string>();
 
+    if (executable.find('\0') != std::string::npos) {
+        result.error_message = "Field 'executable' must not contain NUL byte.";
+
+        return result;
+    }
+
     if (executable.empty()) {
         result.error_message = "Field 'executable' cannot be empty.";
 
@@ -96,7 +102,15 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
                 return result;
             }
 
-            arguments.push_back(element.get<std::string>());
+            std::string argument = element.get<std::string>();
+
+            if (argument.find('\0') != std::string::npos) {
+                result.error_message = "Each element of field 'arguments' must not contain NUL byte.";
+
+                return result;
+            }
+
+            arguments.push_back(argument);
         }
     }
 

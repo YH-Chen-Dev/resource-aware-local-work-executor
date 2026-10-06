@@ -1,0 +1,6 @@
+[
+    {
+        "executable": "/bin/echo",
+        "arguments": ["hello\u0000ignored"]
+    }
+]
