@@ -1,0 +1,7 @@
+[
+    {
+        "executable": "/bin/echo",
+        "arguments": ["hello", "world"],
+        "id": ""
+    }
+]

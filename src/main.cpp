@@ -8,6 +8,7 @@
 #include <optional>
 #include <utility>
 #include <charconv>
+#include <unordered_set>
 
 enum class ManifestLoadStatus {
     Success,
@@ -53,7 +54,7 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
     }
 
     for (auto field = job_json.begin(); field != job_json.end(); ++field) {
-        if (!(field.key() == "executable" || field.key() == "arguments")) {
+        if (!(field.key() == "executable" || field.key() == "arguments" || field.key() == "id")) {
             result.error_message = "Unknown field: " + field.key();
 
             return result;
@@ -114,7 +115,27 @@ JobParseResult parse_job(const nlohmann::json& job_json) {
         }
     }
 
-    result.job = Job {executable, arguments};
+    std::optional<std::string> id;
+
+    if (job_json.contains("id")) {
+        if (!job_json["id"].is_string()) {
+            result.error_message = "Field 'id' must be a string.";
+
+            return result;
+        }
+
+        std::string parse_id = job_json["id"].get<std::string>();
+
+        if (parse_id.empty()) {
+            result.error_message = "Field 'id' cannot be empty.";
+
+            return result;
+        }
+
+        id = parse_id;
+    }
+
+    result.job = Job {executable, arguments, id};
 
     return result;
 }
@@ -178,6 +199,7 @@ ManifestLoadResult load_manifest(const std::string& manifest_path) {
     }
 
     std::vector<Job> jobs;
+    std::unordered_set<std::string> existing_ids;
 
     std::size_t index = 0;
     for (const auto& job_json : manifest_json) {
@@ -191,6 +213,18 @@ ManifestLoadResult load_manifest(const std::string& manifest_path) {
             manifest_load_result.job_index = index;
 
             return manifest_load_result;
+        }
+
+        if (job_parse_result.job->id.has_value()) {
+            if (!existing_ids.insert(*job_parse_result.job->id).second) {
+                manifest_load_result.manifest_load_status = ManifestLoadStatus::SchemaInvalid;
+
+                manifest_load_result.error_message = "duplicate id: " + *job_parse_result.job->id;
+
+                manifest_load_result.job_index = index;
+
+                return manifest_load_result;
+            }
         }
 
         jobs.push_back(std::move(*job_parse_result.job));

@@ -1,0 +1,17 @@
+[
+    {
+        "executable": "/bin/echo",
+        "arguments": ["one"],
+        "id": "compile"
+    },
+    {
+        "executable": "/bin/echo",
+        "arguments": ["two"],
+        "id": "id"
+    },
+    {
+        "executable": "/bin/echo",
+        "arguments": ["three"],
+        "id": "compile"
+    }
+]

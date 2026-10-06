@@ -263,6 +263,48 @@ set_tests_properties(
     WILL_FAIL TRUE
 )
 
+# valid_optional_id
+add_test(
+    NAME valid_optional_id
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/valid_optional_id.json --concurrency 1
+)
+
+# id_wrong_type
+add_test(
+    NAME id_wrong_type
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/id_wrong_type.json --concurrency 1
+)
+
+set_tests_properties(
+    id_wrong_type
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# id_empty
+add_test(
+    NAME id_empty
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/id_empty.json --concurrency 1
+)
+
+set_tests_properties(
+    id_empty
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
+# duplicate_id
+add_test(
+    NAME duplicate_id
+    COMMAND work_executor ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/duplicate_id.json --concurrency 1
+)
+
+set_tests_properties(
+    duplicate_id
+    PROPERTIES
+    WILL_FAIL TRUE
+)
+
 # unknown_field
 add_test(
     NAME unknown_field
