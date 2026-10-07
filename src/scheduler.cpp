@@ -547,6 +547,9 @@ JobLaunchResult launch_job(const Job& job) {
         }
 
         else {
+            // EOF + 0 bytes -> treated as `execv()` succeeded on the close-on-exec error pipe.
+            // If the child is asynchronously terminated after `execv()` fails before any errno bytes are read,
+            // launch success and the interrupted error path are ambiguous.
             result.job_execution_result.child_launch_status = ChildLaunchStatus::Success;
         }
 

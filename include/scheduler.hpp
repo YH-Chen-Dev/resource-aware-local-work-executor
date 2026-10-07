@@ -63,6 +63,7 @@ struct SchedulerResult {
 
 void print_scheduler_error(const SchedulerResult& result);
 
+// Observer callbacks are for test instrumentation and must not throw.
 SchedulerResult scheduler(
     const std::vector<Job>& jobs,
     std::size_t max_concurrency,
