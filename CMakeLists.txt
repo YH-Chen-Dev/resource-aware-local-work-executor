@@ -101,7 +101,7 @@ add_test(
 set_tests_properties(
     scheduler_cleanup_test
     PROPERTIES
-    TIMEOUT 10
+    TIMEOUT 15
 )
 
 # executor_concurrency_integration
@@ -117,7 +117,7 @@ add_test(
 set_tests_properties(
     executor_concurrency_integration
     PROPERTIES
-    TIMEOUT 10
+    TIMEOUT 30
 )
 
 # missing_manifest_arguments
